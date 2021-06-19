@@ -42,7 +42,7 @@ class FeatureExtractor {
 
         ArrayList<MethodContent> methods = functionVisitor.getMethodContents();
 
-        return generatePathFeatures(methods);
+        return generateTreeFeatures(methods);
     }
 
     private CompilationUnit parseFileWithRetries(String code) {
@@ -70,23 +70,24 @@ class FeatureExtractor {
         return parsed;
     }
 
-    private ArrayList<ProgramFeatures> generatePathFeatures(ArrayList<MethodContent> methods) {
+    private ArrayList<ProgramFeatures> generateTreeFeatures(ArrayList<MethodContent> methods) {
         ArrayList<ProgramFeatures> methodsFeatures = new ArrayList<>();
         for (MethodContent content : methods) {
-            ProgramFeatures singleMethodFeatures = generatePathFeaturesForFunction(content);
+            ProgramFeatures singleMethodFeatures = generateTreeFeaturesForFunction(content);
             methodsFeatures.add(singleMethodFeatures);
         }
         return methodsFeatures;
     }
 
-    private ProgramFeatures generatePathFeaturesForFunction(MethodContent methodContent) {
+    private ProgramFeatures generateTreeFeaturesForFunction(MethodContent methodContent) {
         String serializedTree = serializeTree(methodContent.getTreeAsSequence());
         return new ProgramFeatures(methodContent.getName(), serializedTree);
     }
 
     private String serializeTree(ArrayList<Node> treeAsSequence) {
 
-        StringJoiner nodesSequence = new StringJoiner(separator);
+        StringJoiner nodeTypesSequence = new StringJoiner(separator);
+        StringJoiner nodeNamesSequence = new StringJoiner(separator);
         StringJoiner parentIndicesSequence = new StringJoiner(separator);
 
         for (Node currentNode: treeAsSequence) {
@@ -101,16 +102,17 @@ class FeatureExtractor {
                         .toString();
             }
             Property property = currentNode.getUserData(Common.PropertyKey);
-            String nameTerm = Common.EmptyString;
             String name = property.getName();
             if (property.isLeaf() && name != null && !name.isEmpty()) {
-                nameTerm = String.format("%s%s",  nameSeparator, name);
+                nodeNamesSequence.add(name);
+            } else {
+                nodeNamesSequence.add(Common.EmptyString);
             }
 
-            nodesSequence.add(String.format("%s%s%s", property.getType(true), childId, nameTerm));
+            nodeTypesSequence.add(String.format("%s%s", property.getType(true), childId));
             parentIndicesSequence.add(String.valueOf(property.getParentIndex()));
         }
-        return nodesSequence.toString() + " " + parentIndicesSequence.toString();
+        return nodeTypesSequence + " " + nodeNamesSequence + " " + parentIndicesSequence;
     }
 
     private Integer saturateChildId(int childId) {
