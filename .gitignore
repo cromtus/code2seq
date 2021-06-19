@@ -5,3 +5,8 @@
 *.xml
 *.pyc
 
+data
+playground
+trees
+.ipynb_checkpoints
+.vscode

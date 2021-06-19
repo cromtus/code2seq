@@ -13,12 +13,9 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public class Property {
-    public static final HashSet<String> NumericalKeepValues = Stream.of("0", "1", "32", "64")
+    private static final HashSet<String> NumericalKeepValues = Stream.of("0", "1", "32", "64")
             .collect(Collectors.toCollection(HashSet::new));
-    private static final Map<String, String> shortTypes = Collections.unmodifiableMap(new HashMap<String, String>() {
-        /**
-         *
-         */
+    private static final Map<String, String> shortTypes = Collections.unmodifiableMap(new HashMap<>() {
         private static final long serialVersionUID = 1L;
 
         {
@@ -133,8 +130,11 @@ public class Property {
     private final String RawType;
     private String Type;
     private String SplitName;
+    private int upSteps = 0;
+    private boolean isLeaf;
 
     public Property(Node node, boolean isLeaf, boolean isGenericParent) {
+        this.isLeaf = isLeaf;
         Class<?> nodeClass = node.getClass();
         RawType = Type = nodeClass.getSimpleName();
         if (node instanceof ClassOrInterfaceType && ((ClassOrInterfaceType) node).isBoxedType()) {
@@ -202,7 +202,19 @@ public class Property {
         }
     }
 
+    public boolean isLeaf() {
+        return isLeaf;
+    }
+
     public String getName() {
         return SplitName;
+    }
+
+    public void incrementUpSteps() {
+        upSteps++;
+    }
+
+    public int getUpSteps() {
+        return upSteps;
     }
 }

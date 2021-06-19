@@ -1,10 +1,13 @@
-from argparse import ArgumentParser
+from argparse import ArgumentParser, Namespace
 import numpy as np
 import tensorflow as tf
 
 from config import Config
 from interactive_predict import InteractivePredictor
 from model import Model
+import warnings
+
+warnings.filterwarnings('ignore')
 
 if __name__ == '__main__':
     parser = ArgumentParser()
@@ -24,6 +27,13 @@ if __name__ == '__main__':
     parser.add_argument('--debug', action='store_true')
     parser.add_argument('--seed', type=int, default=239)
     args = parser.parse_args()
+    # DEBUG
+    args = Namespace(
+        data_path='data/java-small-preprocessed/java-small',
+        debug=False, load_path=None, predict=False, release=False,
+        save_path_prefix='models/java-small-model/model', seed=239,
+        test_path='data/java-small/java-small.val.c2s'
+    )
 
     np.random.seed(args.seed)
     tf.set_random_seed(args.seed)

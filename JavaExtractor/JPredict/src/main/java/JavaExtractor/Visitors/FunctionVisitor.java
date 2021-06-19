@@ -27,9 +27,8 @@ public class FunctionVisitor extends VoidVisitorAdapter<Object> {
     }
 
     private void visitMethod(MethodDeclaration node) {
-        LeavesCollectorVisitor leavesCollectorVisitor = new LeavesCollectorVisitor();
-        leavesCollectorVisitor.visitDepthFirst(node);
-        ArrayList<Node> leaves = leavesCollectorVisitor.getLeaves();
+        TreeSequenceBuilder treeSequenceBuilder = new TreeSequenceBuilder();
+        ArrayList<Node> treeAsSequence = treeSequenceBuilder.getSequence(node);
 
         String normalizedMethodName = Common.normalizeName(node.getName(), Common.BlankWord);
         ArrayList<String> splitNameParts = Common.splitToSubtokens(node.getName());
@@ -44,7 +43,7 @@ public class FunctionVisitor extends VoidVisitorAdapter<Object> {
             long methodLength = getMethodLength(node.getBody().toString());
             if (commandLineValues.MaxCodeLength <= 0 ||
                     (methodLength >= commandLineValues.MinCodeLength && methodLength <= commandLineValues.MaxCodeLength)) {
-                methods.add(new MethodContent(leaves, splitName, node.toString()));
+                methods.add(new MethodContent(treeAsSequence, splitName, node.toString()));
             }
         }
     }

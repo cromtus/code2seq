@@ -7,32 +7,41 @@ import com.github.javaparser.ast.comments.Comment;
 import com.github.javaparser.ast.expr.NullLiteralExpr;
 import com.github.javaparser.ast.stmt.Statement;
 import com.github.javaparser.ast.type.ClassOrInterfaceType;
-import com.github.javaparser.ast.visitor.TreeVisitor;
 
 import java.util.ArrayList;
 import java.util.List;
 
-public class LeavesCollectorVisitor extends TreeVisitor {
-    private final ArrayList<Node> m_Leaves = new ArrayList<>();
+class TreeSequenceBuilder {
+    private ArrayList<Node> treeSequence;
+    private static String NULL_STR = "null";
 
-    @Override
-    public void process(Node node) {
-        if (node instanceof Comment) {
+    private void visitTree(Node node) {
+        if (node instanceof Comment || NULL_STR.equals(node.toString())) {
             return;
         }
         boolean isLeaf = false;
         boolean isGenericParent = isGenericParent(node);
         if (hasNoChildren(node) && isNotComment(node)) {
             if (!node.toString().isEmpty() && (!"null".equals(node.toString()) || (node instanceof NullLiteralExpr))) {
-                m_Leaves.add(node);
                 isLeaf = true;
             }
         }
-
         int childId = getChildId(node);
         node.setUserData(Common.ChildId, childId);
         Property property = new Property(node, isLeaf, isGenericParent);
         node.setUserData(Common.PropertyKey, property);
+        treeSequence.add(node);
+        for (Node child: node.getChildrenNodes()) {
+            visitTree(child);
+        }
+        Node lastElement = treeSequence.get(treeSequence.size() - 1);
+        lastElement.getUserData(Common.PropertyKey).incrementUpSteps();
+    }
+
+    ArrayList<Node> getSequence(Node node) {
+        treeSequence = new ArrayList<>();
+        visitTree(node);
+        return treeSequence;
     }
 
     private boolean isGenericParent(Node node) {
@@ -47,10 +56,6 @@ public class LeavesCollectorVisitor extends TreeVisitor {
 
     private boolean isNotComment(Node node) {
         return !(node instanceof Comment) && !(node instanceof Statement);
-    }
-
-    public ArrayList<Node> getLeaves() {
-        return m_Leaves;
     }
 
     private int getChildId(Node node) {
