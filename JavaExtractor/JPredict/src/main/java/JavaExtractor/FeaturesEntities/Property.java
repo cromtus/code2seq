@@ -130,11 +130,12 @@ public class Property {
     private final String RawType;
     private String Type;
     private String SplitName;
-    private int upSteps = 0;
+    private int parentIndex;
     private boolean isLeaf;
 
-    public Property(Node node, boolean isLeaf, boolean isGenericParent) {
+    public Property(Node node, boolean isLeaf, boolean isGenericParent, int parentIndex) {
         this.isLeaf = isLeaf;
+        this.parentIndex = parentIndex;
         Class<?> nodeClass = node.getClass();
         RawType = Type = nodeClass.getSimpleName();
         if (node instanceof ClassOrInterfaceType && ((ClassOrInterfaceType) node).isBoxedType()) {
@@ -210,11 +211,7 @@ public class Property {
         return SplitName;
     }
 
-    public void incrementUpSteps() {
-        upSteps++;
-    }
-
-    public int getUpSteps() {
-        return upSteps;
+    public int getParentIndex() {
+        return parentIndex;
     }
 }

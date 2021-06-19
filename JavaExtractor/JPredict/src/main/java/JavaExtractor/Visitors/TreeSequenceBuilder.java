@@ -14,8 +14,9 @@ import java.util.List;
 class TreeSequenceBuilder {
     private ArrayList<Node> treeSequence;
     private static String NULL_STR = "null";
+    public static int NO_PARENT = -1;
 
-    private void visitTree(Node node) {
+    private void visitTree(Node node, int parentIndex) {
         if (node instanceof Comment || NULL_STR.equals(node.toString())) {
             return;
         }
@@ -28,19 +29,18 @@ class TreeSequenceBuilder {
         }
         int childId = getChildId(node);
         node.setUserData(Common.ChildId, childId);
-        Property property = new Property(node, isLeaf, isGenericParent);
+        Property property = new Property(node, isLeaf, isGenericParent, parentIndex);
         node.setUserData(Common.PropertyKey, property);
+        int currentIndex = treeSequence.size();
         treeSequence.add(node);
         for (Node child: node.getChildrenNodes()) {
-            visitTree(child);
+            visitTree(child, currentIndex);
         }
-        Node lastElement = treeSequence.get(treeSequence.size() - 1);
-        lastElement.getUserData(Common.PropertyKey).incrementUpSteps();
     }
 
     ArrayList<Node> getSequence(Node node) {
         treeSequence = new ArrayList<>();
-        visitTree(node);
+        visitTree(node, NO_PARENT);
         return treeSequence;
     }
 

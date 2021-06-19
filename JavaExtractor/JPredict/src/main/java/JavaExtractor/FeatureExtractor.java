@@ -21,9 +21,8 @@ import java.util.stream.Stream;
 
 @SuppressWarnings("StringEquality")
 class FeatureExtractor {
-    private final static String separator = " ";
-    private final static String upSymbol = "^";
-    private final static String nameSeparator = "^";
+    private final static String separator = ";";
+    private final static String nameSeparator = ".";
     private static final Set<String> s_ParentTypeToAddChildId = Stream
             .of("AssignExpr", "ArrayAccessExpr", "FieldAccessExpr", "MethodCallExpr")
             .collect(Collectors.toCollection(HashSet::new));
@@ -87,7 +86,8 @@ class FeatureExtractor {
 
     private String serializeTree(ArrayList<Node> treeAsSequence) {
 
-        StringJoiner stringBuilder = new StringJoiner(separator);
+        StringJoiner nodesSequence = new StringJoiner(separator);
+        StringJoiner parentIndicesSequence = new StringJoiner(separator);
 
         for (Node currentNode: treeAsSequence) {
             String childId = Common.EmptyString;
@@ -107,17 +107,10 @@ class FeatureExtractor {
                 nameTerm = String.format("%s%s",  nameSeparator, name);
             }
 
-            String upTerm = Common.EmptyString;
-            int upSteps = property.getUpSteps();
-            if (upSteps > 0) {
-                upTerm = String.format("%s%d", upSymbol, upSteps);
-            }
-            stringBuilder.add(String.format(
-                    "%s%s%s%s",
-                    property.getType(true), childId, nameTerm, upTerm
-            ));
+            nodesSequence.add(String.format("%s%s%s", property.getType(true), childId, nameTerm));
+            parentIndicesSequence.add(String.valueOf(property.getParentIndex()));
         }
-        return stringBuilder.toString();
+        return nodesSequence.toString() + " " + parentIndicesSequence.toString();
     }
 
     private Integer saturateChildId(int childId) {
