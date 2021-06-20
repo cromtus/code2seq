@@ -80,7 +80,7 @@ class Config:
         config.READER_NUM_PARALLEL_BATCHES = 1
         config.SHUFFLE_BUFFER_SIZE = 10
         config.CSV_BUFFER_SIZE = None
-        config.MAX_CONTEXTS = 5
+        config.MAX_CONTEXTS = 9
         config.SUBTOKENS_VOCAB_MAX_SIZE = 190000
         config.TARGET_VOCAB_MAX_SIZE = 27000
         config.EMBEDDINGS_SIZE = 19

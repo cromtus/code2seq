@@ -32,6 +32,8 @@ class Common:
 
     @staticmethod
     def load_vocab_from_dict(word_to_count, add_values=[], max_size=None):
+        if '' in word_to_count:
+            del word_to_count['']
         word_to_index, index_to_word = {}, {}
         current_index = 0
         for value in add_values:

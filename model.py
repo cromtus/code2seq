@@ -35,12 +35,9 @@ class Model:
                 subtoken_to_count = pickle.load(file)
                 node_to_count = pickle.load(file)
                 target_to_count = pickle.load(file)
-                max_contexts = pickle.load(file)
                 self.num_training_examples = pickle.load(file)
                 print('Dictionaries loaded.')
 
-            if self.config.DATA_NUM_CONTEXTS <= 0:
-                self.config.DATA_NUM_CONTEXTS = max_contexts
             self.subtoken_to_index, self.index_to_subtoken, self.subtoken_vocab_size = \
                 Common.load_vocab_from_dict(subtoken_to_count, add_values=[Common.PAD, Common.UNK],
                                             max_size=config.SUBTOKENS_VOCAB_MAX_SIZE)

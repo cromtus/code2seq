@@ -18,6 +18,27 @@ PATH_SOURCE_STRINGS_KEY = 'PATH_SOURCE_STRINGS_KEY'
 PATH_STRINGS_KEY = 'PATH_STRINGS_KEY'
 PATH_TARGET_STRINGS_KEY = 'PATH_TARGET_STRINGS_KEY'
 
+NODE_IDS_KEY = 'NODE_IDS'
+SUBTOKEN_IDS_KEY = 'SUBTOKEN_IDS'
+TARGET_IDS_KEY = 'TARGET_IDS'
+PARENT_INDICES_KEY = 'PARENT_INDICES'
+INCIDENCE_MATRIX_KEY = 'INCIDENCE_MATRIX'
+
+def scalar_string_split(input, delimiter):
+    return tf.reshape(
+        tf.sparse.to_dense(
+            tf.string_split(tf.expand_dims(input, -1), delimiter, skip_empty=False),
+            default_value=Common.PAD,
+        ),
+        shape=[-1],
+    )
+
+def pad_up_to(input, target_dims, constant_values):
+    shape = tf.shape(input)
+    input = tf.slice(input, (0,) * len(target_dims), tf.minimum(shape, target_dims)) # range-safe slice
+    shape = tf.shape(input)
+    paddings = [[0, m - shape[i]] for i, m in enumerate(target_dims)]
+    return tf.pad(input, paddings, 'CONSTANT', constant_values=constant_values)
 
 class Reader:
     class_subtoken_table = None
@@ -34,7 +55,7 @@ class Reader:
         self.is_evaluating = is_evaluating
 
         self.context_pad = '{},{},{}'.format(Common.PAD, Common.PAD, Common.PAD)
-        self.record_defaults = [[self.context_pad]] * (self.config.DATA_NUM_CONTEXTS + 1)
+        self.record_defaults = [[self.context_pad]] * 4
 
         self.subtoken_table = Reader.get_subtoken_table(subtoken_to_index)
         self.target_table = Reader.get_target_table(target_to_index)
@@ -72,102 +93,44 @@ class Reader:
         return self.process_dataset(*parts)
 
     def process_dataset(self, *row_parts):
+        MAX_NODES = self.config.MAX_CONTEXTS
         row_parts = list(row_parts)
-        word = row_parts[0]  # (, )
 
-        if not self.is_evaluating and self.config.RANDOM_CONTEXTS:
-            all_contexts = tf.stack(row_parts[1:])
-            all_contexts_padded = tf.concat([all_contexts, [self.context_pad]], axis=-1)
-            index_of_blank_context = tf.where(tf.equal(all_contexts_padded, self.context_pad))
-            num_contexts_per_example = tf.reduce_min(index_of_blank_context)
+        target_subtokens = scalar_string_split(row_parts[0], delimiter='|') # (n_target_tokens,)
+        target_subtokens = pad_up_to(target_subtokens, (self.config.MAX_TARGET_PARTS,), Common.PAD)
+        target_ids = self.target_table.lookup(target_subtokens)
 
-            # if there are less than self.max_contexts valid contexts, still sample self.max_contexts
-            safe_limit = tf.cast(tf.maximum(num_contexts_per_example, self.config.MAX_CONTEXTS), tf.int32)
-            rand_indices = tf.random_shuffle(tf.range(safe_limit))[:self.config.MAX_CONTEXTS]
-            contexts = tf.gather(all_contexts, rand_indices)  # (max_contexts,)
-        else:
-            contexts = row_parts[1:(self.config.MAX_CONTEXTS + 1)]  # (max_contexts,)
+        node_types = scalar_string_split(row_parts[1], delimiter=',') # (n_nodes,)
+        node_types = pad_up_to(node_types, (MAX_NODES,), Common.PAD)
+        node_ids = self.node_table.lookup(node_types)
 
-        # contexts: (max_contexts, )
-        split_contexts = tf.string_split(contexts, delimiter=',', skip_empty=False)
-        sparse_split_contexts = tf.sparse.SparseTensor(indices=split_contexts.indices,
-                                                       values=split_contexts.values,
-                                                       dense_shape=[self.config.MAX_CONTEXTS, 3])
-        dense_split_contexts = tf.reshape(
-            tf.sparse.to_dense(sp_input=sparse_split_contexts, default_value=Common.PAD),
-            shape=[self.config.MAX_CONTEXTS, 3])  # (batch, max_contexts, 3)
+        node_names = scalar_string_split(row_parts[2], delimiter=',') # (n_nodes,)
+        nodes_subtokens_sparse = tf.string_split(node_names, delimiter='|') # (n_nodes, n_tokens_i)
+        nodes_subtokens = tf.sparse.to_dense(nodes_subtokens_sparse, Common.PAD) # (n_nodes, max(n_tokens))
+        nodes_subtokens = pad_up_to(nodes_subtokens, (MAX_NODES, self.config.MAX_NAME_PARTS), Common.PAD)
+        nodes_subtokens_ids = self.subtoken_table.lookup(nodes_subtokens)
 
-        split_target_labels = tf.string_split(tf.expand_dims(word, -1), delimiter='|')
-        target_dense_shape = [1, tf.maximum(tf.to_int64(self.config.MAX_TARGET_PARTS),
-                                            split_target_labels.dense_shape[1] + 1)]
-        sparse_target_labels = tf.sparse.SparseTensor(indices=split_target_labels.indices,
-                                                      values=split_target_labels.values,
-                                                      dense_shape=target_dense_shape)
-        dense_target_label = tf.reshape(tf.sparse.to_dense(sp_input=sparse_target_labels,
-                                                           default_value=Common.PAD), [-1])
-        index_of_blank = tf.where(tf.equal(dense_target_label, Common.PAD))
-        target_length = tf.reduce_min(index_of_blank)
-        dense_target_label = dense_target_label[:self.config.MAX_TARGET_PARTS]
-        clipped_target_lengths = tf.clip_by_value(target_length, clip_value_min=0,
-                                                  clip_value_max=self.config.MAX_TARGET_PARTS)
-        target_word_labels = tf.concat([
-            self.target_table.lookup(dense_target_label), [0]], axis=-1)  # (max_target_parts + 1) of int
+        parent_indices = scalar_string_split(row_parts[3], delimiter=',') # (n_nodes,)
+        parent_indices = tf.strings.to_number(parent_indices, tf.int32)
+        parent_indices = pad_up_to(parent_indices, (MAX_NODES,), -1)
 
-        path_source_strings = tf.slice(dense_split_contexts, [0, 0], [self.config.MAX_CONTEXTS, 1])  # (max_contexts, 1)
-        flat_source_strings = tf.reshape(path_source_strings, [-1])  # (max_contexts)
-        split_source = tf.string_split(flat_source_strings, delimiter='|',
-                                       skip_empty=False)  # (max_contexts, max_name_parts)
+        children_indices = tf.range(tf.shape(parent_indices)[0])
+        incident_indices = tf.transpose([children_indices, parent_indices])[1:] # 0th node has no parent
+        incident_indices = tf.concat([incident_indices, incident_indices[:, ::-1]], axis=0) # symmetry
+        incidence_matrix = tf.SparseTensor(
+            tf.cast(incident_indices, tf.int64),
+            tf.ones(tf.shape(incident_indices)[0]),
+            (MAX_NODES, MAX_NODES),
+        )
+        incidence_matrix = tf.sparse.reorder(incidence_matrix)
 
-        sparse_split_source = tf.sparse.SparseTensor(indices=split_source.indices, values=split_source.values,
-                                                     dense_shape=[self.config.MAX_CONTEXTS,
-                                                                  tf.maximum(tf.to_int64(self.config.MAX_NAME_PARTS),
-                                                                             split_source.dense_shape[1])])
-        dense_split_source = tf.sparse.to_dense(sp_input=sparse_split_source,
-                                                default_value=Common.PAD)  # (max_contexts, max_name_parts)
-        dense_split_source = tf.slice(dense_split_source, [0, 0], [-1, self.config.MAX_NAME_PARTS])
-        path_source_indices = self.subtoken_table.lookup(dense_split_source)  # (max_contexts, max_name_parts)
-        path_source_lengths = tf.reduce_sum(tf.cast(tf.not_equal(dense_split_source, Common.PAD), tf.int32),
-                                            -1)  # (max_contexts)
-
-        path_strings = tf.slice(dense_split_contexts, [0, 1], [self.config.MAX_CONTEXTS, 1])
-        flat_path_strings = tf.reshape(path_strings, [-1])
-        split_path = tf.string_split(flat_path_strings, delimiter='|', skip_empty=False)
-        sparse_split_path = tf.sparse.SparseTensor(indices=split_path.indices, values=split_path.values,
-                                                   dense_shape=[self.config.MAX_CONTEXTS, self.config.MAX_PATH_LENGTH])
-        dense_split_path = tf.sparse.to_dense(sp_input=sparse_split_path,
-                                              default_value=Common.PAD)  # (batch, max_contexts, max_path_length)
-
-        node_indices = self.node_table.lookup(dense_split_path)  # (max_contexts, max_path_length)
-        path_lengths = tf.reduce_sum(tf.cast(tf.not_equal(dense_split_path, Common.PAD), tf.int32),
-                                     -1)  # (max_contexts)
-
-        path_target_strings = tf.slice(dense_split_contexts, [0, 2], [self.config.MAX_CONTEXTS, 1])  # (max_contexts, 1)
-        flat_target_strings = tf.reshape(path_target_strings, [-1])  # (max_contexts)
-        split_target = tf.string_split(flat_target_strings, delimiter='|',
-                                       skip_empty=False)  # (max_contexts, max_name_parts)
-        sparse_split_target = tf.sparse.SparseTensor(indices=split_target.indices, values=split_target.values,
-                                                     dense_shape=[self.config.MAX_CONTEXTS,
-                                                                  tf.maximum(tf.to_int64(self.config.MAX_NAME_PARTS),
-                                                                             split_target.dense_shape[1])])
-        dense_split_target = tf.sparse.to_dense(sp_input=sparse_split_target,
-                                                default_value=Common.PAD)  # (max_contexts, max_name_parts)
-        dense_split_target = tf.slice(dense_split_target, [0, 0], [-1, self.config.MAX_NAME_PARTS])
-        path_target_indices = self.subtoken_table.lookup(dense_split_target)  # (max_contexts, max_name_parts)
-        path_target_lengths = tf.reduce_sum(tf.cast(tf.not_equal(dense_split_target, Common.PAD), tf.int32),
-                                            -1)  # (max_contexts)
-
-        valid_contexts_mask = tf.to_float(tf.not_equal(
-            tf.reduce_max(path_source_indices, -1) + tf.reduce_max(node_indices, -1) + tf.reduce_max(
-                path_target_indices, -1), 0))
-
-        return {TARGET_STRING_KEY: word, TARGET_INDEX_KEY: target_word_labels,
-                TARGET_LENGTH_KEY: clipped_target_lengths,
-                PATH_SOURCE_INDICES_KEY: path_source_indices, NODE_INDICES_KEY: node_indices,
-                PATH_TARGET_INDICES_KEY: path_target_indices, VALID_CONTEXT_MASK_KEY: valid_contexts_mask,
-                PATH_SOURCE_LENGTHS_KEY: path_source_lengths, PATH_LENGTHS_KEY: path_lengths,
-                PATH_TARGET_LENGTHS_KEY: path_target_lengths, PATH_SOURCE_STRINGS_KEY: path_source_strings,
-                PATH_STRINGS_KEY: path_strings, PATH_TARGET_STRINGS_KEY: path_target_strings
-                }
+        return {
+            NODE_IDS_KEY: nodes_subtokens_ids,
+            SUBTOKEN_IDS_KEY: nodes_subtokens_ids,
+            TARGET_IDS_KEY: target_ids,
+            PARENT_INDICES_KEY: parent_indices,
+            INCIDENCE_MATRIX_KEY: incidence_matrix,
+        }
 
     def reset(self, sess):
         sess.run(self.reset_op)
