@@ -23,8 +23,7 @@ def ParallelExtractDir(args, dir):
 
 
 def ExtractFeaturesForDir(args, dir, prefix):
-    command = ['java', '-Xmx100g', '-XX:MaxNewSize=60g', '-cp', args.jar, 'JavaExtractor.App',
-               '--max_path_length', str(args.max_path_length), '--max_path_width', str(args.max_path_width),
+    command = ['java', '-Xmx100g', '-XX:MaxNewSize=60g', '-jar', args.jar,
                '--dir', dir, '--num_threads', str(args.num_threads)]
 
     # print command
@@ -77,8 +76,6 @@ def ExtractFeaturesForDirsList(args, dirs):
 
 if __name__ == '__main__':
     parser = ArgumentParser()
-    parser.add_argument("-maxlen", "--max_path_length", dest="max_path_length", required=False, default=8)
-    parser.add_argument("-maxwidth", "--max_path_width", dest="max_path_width", required=False, default=2)
     parser.add_argument("-threads", "--num_threads", dest="num_threads", required=False, default=64)
     parser.add_argument("-j", "--jar", dest="jar", required=True)
     parser.add_argument("-dir", "--dir", dest="dir", required=False)
@@ -86,8 +83,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     if args.file is not None:
-        command = 'java -cp ' + args.jar + ' JavaExtractor.App --max_path_length ' + \
-                  str(args.max_path_length) + ' --max_path_width ' + str(args.max_path_width) + ' --file ' + args.file
+        command = 'java -jar ' + args.jar + ' --file ' + args.file
         os.system(command)
     elif args.dir is not None:
         subdirs = get_immediate_subdirectories(args.dir)

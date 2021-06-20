@@ -21,8 +21,7 @@ import java.util.stream.Stream;
 
 @SuppressWarnings("StringEquality")
 class FeatureExtractor {
-    private final static String separator = ";";
-    private final static String nameSeparator = ".";
+    private final static String separator = ",";
     private static final Set<String> s_ParentTypeToAddChildId = Stream
             .of("AssignExpr", "ArrayAccessExpr", "FieldAccessExpr", "MethodCallExpr")
             .collect(Collectors.toCollection(HashSet::new));

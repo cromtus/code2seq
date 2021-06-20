@@ -16,12 +16,6 @@ public class CommandLineValues {
     @Option(name = "--dir", required = false, forbids = "--file")
     public String Dir = null;
 
-    @Option(name = "--max_path_length", required = true)
-    public int MaxPathLength;
-
-    @Option(name = "--max_path_width", required = true)
-    public int MaxPathWidth;
-
     @Option(name = "--num_threads", required = false)
     public int NumThreads = 64;
 
