@@ -10,6 +10,17 @@ import reader
 from common import Common
 from rouge import FilesRouge
 
+from layers import Encoder, Decoder
+
+def create_padding_mask(seq):
+    seq = tf.cast(tf.math.equal(seq, 0), tf.float32)
+    # add extra dimensions to add the padding
+    # to the attention logits.
+    return seq[:, tf.newaxis, tf.newaxis, :]  # (batch_size, 1, 1, seq_len)
+
+def create_look_ahead_mask(size):
+    mask = 1 - tf.linalg.band_part(tf.ones((size, size)), -1, 0)
+    return mask  # (seq_len, seq_len)
 
 class Model:
     topk = 10
@@ -72,6 +83,9 @@ class Model:
                                           node_to_index=self.node_to_index,
                                           target_to_index=self.target_to_index,
                                           config=self.config)
+        self.encoder = Encoder(4, self.config.EMBEDDINGS_SIZE * 2, 8, 512)
+        self.decoder = Decoder(4, self.config.EMBEDDINGS_SIZE, 8, 512,
+                           self.target_vocab_size, self.config.MAX_TARGET_PARTS)
         optimizer, train_loss = self.build_training_graph(self.queue_thread.get_output())
         self.print_hyperparams()
         print('Number of trainable params:',
@@ -330,15 +344,11 @@ class Model:
         print(throughput_message)
 
     def build_training_graph(self, input_tensors):
-        target_index = input_tensors[reader.TARGET_INDEX_KEY]
-        target_lengths = input_tensors[reader.TARGET_LENGTH_KEY]
-        path_source_indices = input_tensors[reader.PATH_SOURCE_INDICES_KEY]
-        node_indices = input_tensors[reader.NODE_INDICES_KEY]
-        path_target_indices = input_tensors[reader.PATH_TARGET_INDICES_KEY]
-        valid_context_mask = input_tensors[reader.VALID_CONTEXT_MASK_KEY]
-        path_source_lengths = input_tensors[reader.PATH_SOURCE_LENGTHS_KEY]
-        path_lengths = input_tensors[reader.PATH_LENGTHS_KEY]
-        path_target_lengths = input_tensors[reader.PATH_TARGET_LENGTHS_KEY]
+        node_ids = input_tensors[reader.NODE_IDS_KEY]
+        nodes_subtokens_ids = input_tensors[reader.SUBTOKEN_IDS_KEY]
+        target_ids = input_tensors[reader.TARGET_IDS_KEY]
+        parent_indices = input_tensors[reader.PARENT_INDICES_KEY]
+        incidence_matrix = input_tensors[reader.INCIDENCE_MATRIX_KEY]
 
         with tf.variable_scope('model'):
             subtoken_vocab = tf.get_variable('SUBTOKENS_VOCAB',
@@ -358,26 +368,29 @@ class Model:
                                           initializer=tf.contrib.layers.variance_scaling_initializer(factor=1.0,
                                                                                                      mode='FAN_OUT',
                                                                                                      uniform=True))
-            # (batch, max_contexts, decoder_size)
-            batched_contexts = self.compute_contexts(subtoken_vocab=subtoken_vocab, nodes_vocab=nodes_vocab,
-                                                     source_input=path_source_indices, nodes_input=node_indices,
-                                                     target_input=path_target_indices,
-                                                     valid_mask=valid_context_mask,
-                                                     path_source_lengths=path_source_lengths,
-                                                     path_lengths=path_lengths, path_target_lengths=path_target_lengths)
 
-            batch_size = tf.shape(target_index)[0]
-            outputs, final_states = self.decode_outputs(target_words_vocab=target_words_vocab,
-                                                        target_input=target_index, batch_size=batch_size,
-                                                        batched_contexts=batched_contexts,
-                                                        valid_mask=valid_context_mask)
+            batch_size = tf.shape(node_ids)[0]
+
+            mask = create_padding_mask(node_ids)
+
+            nodes_mask = tf.cast(tf.not_equal(nodes_subtokens_ids, 0), tf.float32)[:, :, :, tf.newaxis]
+            nodes_types_emb = tf.nn.embedding_lookup(params=nodes_vocab, ids=node_ids)
+            nodes_subtoken_emb = tf.nn.embedding_lookup(params=subtoken_vocab, ids=nodes_subtokens_ids)
+            nodes_emb = tf.concat([nodes_types_emb, tf.reduce_sum(nodes_subtoken_emb * nodes_mask, axis=-2)], axis=-1)
+            incidence_matrix = incidence_matrix[:, tf.newaxis, :, :]
+            encoded = self.encoder(nodes_emb, True, mask, incidence_matrix)
+
+            target_mask = create_padding_mask(target_ids)
+            look_ahead_mask = create_look_ahead_mask(self.config.MAX_TARGET_PARTS)
+            combined_mask = tf.maximum(target_mask, look_ahead_mask)
+
+            target_emb = tf.nn.embedding_lookup(params=target_words_vocab, ids=target_ids)
+            logits, _ = self.decoder(target_emb, encoded, True, combined_mask, mask, self.target_vocab_size)
+
             step = tf.Variable(0, trainable=False)
 
-            logits = outputs.rnn_output  # (batch, max_output_length, dim * 2 + rnn_size)
-
-            crossent = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=target_index, logits=logits)
-            target_words_nonzero = tf.sequence_mask(target_lengths + 1,
-                                                    maxlen=self.config.MAX_TARGET_PARTS + 1, dtype=tf.float32)
+            crossent = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=target_ids, logits=logits)
+            target_words_nonzero = tf.cast(tf.not_equal(target_ids, 0), tf.float32)
             loss = tf.reduce_sum(crossent * target_words_nonzero) / tf.to_float(batch_size)
 
             if self.config.USE_MOMENTUM:

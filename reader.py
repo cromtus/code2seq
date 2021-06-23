@@ -123,9 +123,10 @@ class Reader:
             (MAX_NODES, MAX_NODES),
         )
         incidence_matrix = tf.sparse.reorder(incidence_matrix)
+        incidence_matrix = tf.sparse.to_dense(incidence_matrix)
 
         return {
-            NODE_IDS_KEY: nodes_subtokens_ids,
+            NODE_IDS_KEY: node_ids,
             SUBTOKEN_IDS_KEY: nodes_subtokens_ids,
             TARGET_IDS_KEY: target_ids,
             PARENT_INDICES_KEY: parent_indices,

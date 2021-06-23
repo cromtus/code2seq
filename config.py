@@ -83,7 +83,7 @@ class Config:
         config.MAX_CONTEXTS = 9
         config.SUBTOKENS_VOCAB_MAX_SIZE = 190000
         config.TARGET_VOCAB_MAX_SIZE = 27000
-        config.EMBEDDINGS_SIZE = 19
+        config.EMBEDDINGS_SIZE = 32
         config.RNN_SIZE = 10
         config.DECODER_SIZE = 11
         config.NUM_DECODER_LAYERS = 1
