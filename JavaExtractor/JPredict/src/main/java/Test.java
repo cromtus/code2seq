@@ -1,5 +1,10 @@
 class Test {
-    <T> void fooBar(T... args) {
-        System.out.println("http://github.com");
+    public static void test() {
+        new Runnable() {
+            @Override
+            public void run() {
+                System.out.println("Hello, world!");
+            }
+        }.run();
     }
 }

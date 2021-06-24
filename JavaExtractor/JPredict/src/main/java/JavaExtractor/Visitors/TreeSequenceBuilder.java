@@ -13,8 +13,15 @@ import java.util.List;
 
 class TreeSequenceBuilder {
     private ArrayList<Node> treeSequence;
+    private ArrayList<Integer> parentIndices;
     private static String NULL_STR = "null";
     public static int NO_PARENT = -1;
+
+    public TreeSequenceBuilder(Node node) {
+        treeSequence = new ArrayList<>();
+        parentIndices = new ArrayList<>();
+        visitTree(node, NO_PARENT);
+    }
 
     private void visitTree(Node node, int parentIndex) {
         if (node instanceof Comment || NULL_STR.equals(node.toString())) {
@@ -29,19 +36,22 @@ class TreeSequenceBuilder {
         }
         int childId = getChildId(node);
         node.setUserData(Common.ChildId, childId);
-        Property property = new Property(node, isLeaf, isGenericParent, parentIndex);
+        Property property = new Property(node, isLeaf, isGenericParent);
         node.setUserData(Common.PropertyKey, property);
         int currentIndex = treeSequence.size();
         treeSequence.add(node);
+        parentIndices.add(parentIndex);
         for (Node child: node.getChildrenNodes()) {
             visitTree(child, currentIndex);
         }
     }
 
-    ArrayList<Node> getSequence(Node node) {
-        treeSequence = new ArrayList<>();
-        visitTree(node, NO_PARENT);
+    ArrayList<Node> getTreeSequence() {
         return treeSequence;
+    }
+
+    ArrayList<Integer> getParentIndices() {
+        return parentIndices;
     }
 
     private boolean isGenericParent(Node node) {

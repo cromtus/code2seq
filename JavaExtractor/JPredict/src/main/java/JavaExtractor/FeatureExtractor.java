@@ -79,17 +79,20 @@ class FeatureExtractor {
     }
 
     private ProgramFeatures generateTreeFeaturesForFunction(MethodContent methodContent) {
-        String serializedTree = serializeTree(methodContent.getTreeAsSequence());
+        String serializedTree = serializeTree(methodContent);
         return new ProgramFeatures(methodContent.getName(), serializedTree);
     }
 
-    private String serializeTree(ArrayList<Node> treeAsSequence) {
+    private String serializeTree(MethodContent methodContent) {
+        ArrayList<Node> treeAsSequence = methodContent.getTreeSequence();
+        ArrayList<Integer> parentIndices = methodContent.getParentIndices();
 
         StringJoiner nodeTypesSequence = new StringJoiner(separator);
         StringJoiner nodeNamesSequence = new StringJoiner(separator);
         StringJoiner parentIndicesSequence = new StringJoiner(separator);
 
-        for (Node currentNode: treeAsSequence) {
+        for (int i = 0; i < treeAsSequence.size(); i++) {
+            Node currentNode = treeAsSequence.get(i);
             String childId = Common.EmptyString;
             String parentRawType = Common.EmptyString;
             Property parentPropery = currentNode.getParentNode().getUserData(Common.PropertyKey);
@@ -109,7 +112,7 @@ class FeatureExtractor {
             }
 
             nodeTypesSequence.add(String.format("%s%s", property.getType(true), childId));
-            parentIndicesSequence.add(String.valueOf(property.getParentIndex()));
+            parentIndicesSequence.add(String.valueOf(parentIndices.get(i)));
         }
         return nodeTypesSequence + " " + nodeNamesSequence + " " + parentIndicesSequence;
     }

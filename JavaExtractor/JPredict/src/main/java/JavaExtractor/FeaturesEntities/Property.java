@@ -130,12 +130,10 @@ public class Property {
     private final String RawType;
     private String Type;
     private String SplitName;
-    private int parentIndex;
     private boolean isLeaf;
 
-    public Property(Node node, boolean isLeaf, boolean isGenericParent, int parentIndex) {
+    public Property(Node node, boolean isLeaf, boolean isGenericParent) {
         this.isLeaf = isLeaf;
-        this.parentIndex = parentIndex;
         Class<?> nodeClass = node.getClass();
         RawType = Type = nodeClass.getSimpleName();
         if (node instanceof ClassOrInterfaceType && ((ClassOrInterfaceType) node).isBoxedType()) {
@@ -209,9 +207,5 @@ public class Property {
 
     public String getName() {
         return SplitName;
-    }
-
-    public int getParentIndex() {
-        return parentIndex;
     }
 }
