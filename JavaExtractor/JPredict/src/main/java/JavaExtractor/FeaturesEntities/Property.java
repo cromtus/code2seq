@@ -15,7 +15,7 @@ import java.util.stream.Stream;
 public class Property {
     private static final HashSet<String> NumericalKeepValues = Stream.of("0", "1", "32", "64")
             .collect(Collectors.toCollection(HashSet::new));
-    private static final Map<String, String> shortTypes = Collections.unmodifiableMap(new HashMap<>() {
+    private static final Map<String, String> shortTypes = Collections.unmodifiableMap(new HashMap<String, String>() {
         private static final long serialVersionUID = 1L;
 
         {
