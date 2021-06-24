@@ -70,7 +70,11 @@ class Common:
 
     @staticmethod
     def filter_impossible_names(top_words):
-        result = list(filter(Common.legal_method_names_checker, top_words))
+        result = []
+        for word in top_words:
+            if not Common.legal_method_names_checker(word):
+                break
+            result.append(word)
         return result
 
     @staticmethod
