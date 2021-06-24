@@ -55,7 +55,7 @@ class Model:
             print('Loaded subtoken vocab. size: %d' % self.subtoken_vocab_size)
 
             self.target_to_index, self.index_to_target, self.target_vocab_size = \
-                Common.load_vocab_from_dict(target_to_count, add_values=[Common.PAD, Common.UNK, Common.SOS],
+                Common.load_vocab_from_dict(target_to_count, add_values=[Common.PAD, Common.UNK, Common.SOS, Common.EOS],
                                             max_size=config.TARGET_VOCAB_MAX_SIZE)
             print('Loaded target word vocab. size: %d' % self.target_vocab_size)
 
@@ -345,6 +345,23 @@ class Model:
             target_mask = create_padding_mask(input_target_ids)
             look_ahead_mask = create_look_ahead_mask(self.config.MAX_TARGET_PARTS)
             combined_mask = tf.maximum(target_mask, look_ahead_mask)
+
+            # add <EOS>
+            EOS_target_indices = tf.reduce_sum(tf.cast(tf.not_equal(output_target_ids, 0), tf.int32), axis=-1)
+            EOS_batch_indices = tf.range(batch_size)
+            EOS_indices = tf.transpose([EOS_batch_indices, EOS_target_indices])
+            inrange_mask = tf.less(EOS_target_indices, self.config.MAX_TARGET_PARTS)
+            EOS_indices = tf.cast(tf.boolean_mask(EOS_indices, inrange_mask), tf.int64)
+            output_target_ids = tf.add(
+                output_target_ids,
+                tf.sparse.to_dense(
+                    tf.SparseTensor(
+                        EOS_indices,
+                        tf.fill(tf.shape(EOS_indices)[:1], self.queue_thread.EOS_id),
+                        (batch_size, self.config.MAX_TARGET_PARTS)
+                    )
+                )
+            )
 
             target_emb = tf.nn.embedding_lookup(params=target_words_vocab, ids=input_target_ids)
             logits, _ = self.decoder(target_emb, encoded, True, combined_mask, input_mask, self.target_vocab_size)

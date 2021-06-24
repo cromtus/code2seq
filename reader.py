@@ -51,6 +51,7 @@ class Reader:
         self.target_table = Reader.get_target_table(target_to_index)
         self.node_table = Reader.get_node_table(node_to_index)
         self.SOS_id = target_to_index[Common.SOS]
+        self.EOS_id = target_to_index[Common.EOS]
         if self.file_path is not None:
             self.output_tensors = self.compute_output()
 
