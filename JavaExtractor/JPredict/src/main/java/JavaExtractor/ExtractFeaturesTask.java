@@ -33,7 +33,7 @@ class ExtractFeaturesTask implements Callable<Void> {
         ArrayList<ProgramFeatures> features;
         try {
             features = extractSingleFile();
-        } catch (IOException e) {
+        } catch (Exception e) {
             e.printStackTrace();
             System.err.println("Couldn't process " + filePath);
             return;
