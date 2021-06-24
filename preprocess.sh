@@ -21,7 +21,7 @@
 #   recommended to use a multi-core machine for the preprocessing 
 #   step and set this value to the number of cores.
 # PYTHON - python3 interpreter alias.
-DATASET_NAME=java-very-small
+DATASET_NAME=java-small
 TRAIN_DIR=data/${DATASET_NAME}/training
 VAL_DIR=data/${DATASET_NAME}/validation
 TEST_DIR=data/${DATASET_NAME}/test

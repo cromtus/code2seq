@@ -5,9 +5,9 @@
 # test_data: by default, points to the validation set, since this is the set that
 #   will be evaluated after each training iteration. If you wish to test
 #   on the final (held-out) test set, change 'val' to 'test'.
-type=java-small-model
-dataset_name=java-small
-data_dir=data/java-small
+type=java-very-small-model
+dataset_name=java-very-small
+data_dir=data/java-very-small-preprocessed
 data=${data_dir}/${dataset_name}
 test_data=${data_dir}/${dataset_name}.val.c2s
 model_dir=models/${type}

@@ -11,3 +11,5 @@ trees
 .ipynb_checkpoints
 .vscode
 error_log.txt
+hs_err_pid*.log
+models

@@ -10,7 +10,7 @@ import reader
 from common import Common
 from rouge import FilesRouge
 
-from layers import Encoder, Decoder
+from transformer import Encoder, Decoder
 
 def create_padding_mask(seq):
     seq = tf.cast(tf.math.equal(seq, 0), tf.float32)
@@ -35,7 +35,7 @@ class Model:
 
         self.eval_placeholder = None
         self.predict_placeholder = None
-        self.eval_predicted_indices_op, self.eval_top_values_op, self.eval_true_target_strings_op, self.eval_topk_values = None, None, None, None
+        self.eval_predicted_indices_op, self.eval_top_values_op, self.eval_true_target_strings_op = None, None, None
         self.predict_top_indices_op, self.predict_top_scores_op, self.predict_target_strings_op = None, None, None
         self.subtoken_to_index = None
 
@@ -62,6 +62,10 @@ class Model:
             self.node_to_index, self.index_to_node, self.nodes_vocab_size = \
                 Common.load_vocab_from_dict(node_to_count, add_values=[Common.PAD, Common.UNK], max_size=None)
             print('Loaded nodes vocab. size: %d' % self.nodes_vocab_size)
+
+            self.encoder = Encoder(self.config.NUM_ENCODER_LAYERS, self.config.EMBEDDINGS_SIZE * 2, self.config.NUM_ATTENTION_HEADS, 512)
+            self.decoder = Decoder(self.config.NUM_DECODER_LAYERS, self.config.EMBEDDINGS_SIZE, self.config.NUM_ATTENTION_HEADS, 512,
+                            self.target_vocab_size, self.config.MAX_TARGET_PARTS)
             self.epochs_trained = 0
 
     def close_session(self):
@@ -83,9 +87,6 @@ class Model:
                                           node_to_index=self.node_to_index,
                                           target_to_index=self.target_to_index,
                                           config=self.config)
-        self.encoder = Encoder(4, self.config.EMBEDDINGS_SIZE * 2, 8, 512)
-        self.decoder = Decoder(4, self.config.EMBEDDINGS_SIZE, 8, 512,
-                           self.target_vocab_size, self.config.MAX_TARGET_PARTS)
         optimizer, train_loss = self.build_training_graph(self.queue_thread.get_output())
         self.print_hyperparams()
         print('Number of trainable params:',
@@ -117,10 +118,7 @@ class Model:
                 self.epochs_trained += self.config.SAVE_EVERY_EPOCHS
                 print('Finished %d epochs' % self.config.SAVE_EVERY_EPOCHS)
                 results, precision, recall, f1, rouge = self.evaluate()
-                if self.config.BEAM_WIDTH == 0:
-                    print('Accuracy after %d epochs: %.5f' % (self.epochs_trained, results))
-                else:
-                    print('Accuracy after {} epochs: {}'.format(self.epochs_trained, results))
+                print('Accuracy after %d epochs: %.5f' % (self.epochs_trained, results))
                 print('After %d epochs: Precision: %.5f, recall: %.5f, F1: %.5f' % (
                     self.epochs_trained, precision, recall, f1))
                 print('Rouge: ', rouge)
@@ -161,8 +159,7 @@ class Model:
                                             target_to_index=self.target_to_index,
                                             config=self.config, is_evaluating=True)
             reader_output = self.eval_queue.get_output()
-            self.eval_predicted_indices_op, self.eval_topk_values, _, _ = \
-                self.build_test_graph(reader_output)
+            self.eval_predicted_indices_op = self.build_test_graph(reader_output)
             self.eval_true_target_strings_op = reader_output[reader.TARGET_STRING_KEY]
             self.saver = tf.train.Saver(max_to_keep=10)
 
@@ -184,8 +181,7 @@ class Model:
         with open(model_dirname + '/log.txt', 'w') as output_file, open(ref_file_name, 'w') as ref_file, open(
                 predicted_file_name,
                 'w') as pred_file:
-            num_correct_predictions = 0 if self.config.BEAM_WIDTH == 0 \
-                else np.zeros([self.config.BEAM_WIDTH], dtype=np.int32)
+            num_correct_predictions = 0
             total_predictions = 0
             total_prediction_batches = 0
             true_positive, false_positive, false_negative = 0, 0, 0
@@ -194,26 +190,17 @@ class Model:
 
             try:
                 while True:
-                    predicted_indices, true_target_strings, top_values = self.sess.run(
-                        [self.eval_predicted_indices_op, self.eval_true_target_strings_op, self.eval_topk_values],
+                    predicted_indices, true_target_strings = self.sess.run(
+                        [self.eval_predicted_indices_op, self.eval_true_target_strings_op],
                     )
                     true_target_strings = Common.binary_to_string_list(true_target_strings)
                     ref_file.write(
                         '\n'.join(
                             [name.replace(Common.internal_delimiter, ' ') for name in true_target_strings]) + '\n')
-                    if self.config.BEAM_WIDTH > 0:
-                        # predicted indices: (batch, time, beam_width)
-                        predicted_strings = [[[self.index_to_target[i] for i in timestep] for timestep in example] for
-                                             example in predicted_indices]
-                        predicted_strings = [list(map(list, zip(*example))) for example in
-                                             predicted_strings]  # (batch, top-k, target_length)
-                        pred_file.write('\n'.join(
-                            [' '.join(Common.filter_impossible_names(words)) for words in predicted_strings[0]]) + '\n')
-                    else:
-                        predicted_strings = [[self.index_to_target[i] for i in example]
-                                             for example in predicted_indices]
-                        pred_file.write('\n'.join(
-                            [' '.join(Common.filter_impossible_names(words)) for words in predicted_strings]) + '\n')
+                    predicted_strings = [[self.index_to_target[i] for i in example]
+                                            for example in predicted_indices]
+                    pred_file.write('\n'.join(
+                        [' '.join(Common.filter_impossible_names(words)) for words in predicted_strings]) + '\n')
 
                     num_correct_predictions = self.update_correct_predictions(num_correct_predictions, output_file,
                                                                               zip(true_target_strings,
@@ -251,35 +238,17 @@ class Model:
             original_name_parts = original_name.split(Common.internal_delimiter) # list
             filtered_original = Common.filter_impossible_names(original_name_parts) # list
             predicted_first = predicted
-            if self.config.BEAM_WIDTH > 0:
-                predicted_first = predicted[0]
             filtered_predicted_first_parts = Common.filter_impossible_names(predicted_first) # list
 
-            if self.config.BEAM_WIDTH == 0:
-                output_file.write('Original: ' + Common.internal_delimiter.join(original_name_parts) +
-                                  ' , predicted 1st: ' + Common.internal_delimiter.join(filtered_predicted_first_parts) + '\n')
-                if filtered_original == filtered_predicted_first_parts or Common.unique(filtered_original) == Common.unique(
-                        filtered_predicted_first_parts) or ''.join(filtered_original) == ''.join(filtered_predicted_first_parts):
-                    num_correct_predictions += 1
-            else:
-                filtered_predicted = [Common.internal_delimiter.join(Common.filter_impossible_names(p)) for p in predicted]
-
-                true_ref = original_name
-                output_file.write('Original: ' + ' '.join(original_name_parts) + '\n')
-                for i, p in enumerate(filtered_predicted):
-                    output_file.write('\t@{}: {}'.format(i + 1, ' '.join(p.split(Common.internal_delimiter)))+ '\n')
-                if true_ref in filtered_predicted:
-                    index_of_correct = filtered_predicted.index(true_ref)
-                    update = np.concatenate(
-                        [np.zeros(index_of_correct, dtype=np.int32),
-                         np.ones(self.config.BEAM_WIDTH - index_of_correct, dtype=np.int32)])
-                    num_correct_predictions += update
+            output_file.write('Original: ' + Common.internal_delimiter.join(original_name_parts) +
+                                ' , predicted 1st: ' + Common.internal_delimiter.join(filtered_predicted_first_parts) + '\n')
+            if filtered_original == filtered_predicted_first_parts or Common.unique(filtered_original) == Common.unique(
+                    filtered_predicted_first_parts) or ''.join(filtered_original) == ''.join(filtered_predicted_first_parts):
+                num_correct_predictions += 1
         return num_correct_predictions
 
     def update_per_subtoken_statistics(self, results, true_positive, false_positive, false_negative):
         for original_name, predicted in results:
-            if self.config.BEAM_WIDTH > 0:
-                predicted = predicted[0]
             filtered_predicted_names = Common.filter_impossible_names(predicted)
             filtered_original_subtokens = Common.filter_impossible_names(original_name.split(Common.internal_delimiter))
 
@@ -305,10 +274,6 @@ class Model:
         print('Taking max contexts from each example:\t', self.config.MAX_CONTEXTS)
         print('Random path sampling:\t\t\t', self.config.RANDOM_CONTEXTS)
         print('Embedding size:\t\t\t\t', self.config.EMBEDDINGS_SIZE)
-        if self.config.BIRNN:
-            print('Using BiLSTMs, each of size:\t\t', self.config.RNN_SIZE // 2)
-        else:
-            print('Uni-directional LSTM of size:\t\t', self.config.RNN_SIZE)
         print('Decoder size:\t\t\t\t', self.config.DECODER_SIZE)
         print('Decoder layers:\t\t\t\t', self.config.NUM_DECODER_LAYERS)
         print('Max path lengths:\t\t\t', self.config.MAX_PATH_LENGTH)
@@ -346,8 +311,7 @@ class Model:
     def build_training_graph(self, input_tensors):
         node_ids = input_tensors[reader.NODE_IDS_KEY]
         nodes_subtokens_ids = input_tensors[reader.SUBTOKEN_IDS_KEY]
-        target_ids = input_tensors[reader.TARGET_IDS_KEY]
-        parent_indices = input_tensors[reader.PARENT_INDICES_KEY]
+        output_target_ids = input_tensors[reader.TARGET_IDS_KEY]
         incidence_matrix = input_tensors[reader.INCIDENCE_MATRIX_KEY]
 
         with tf.variable_scope('model'):
@@ -371,26 +335,24 @@ class Model:
 
             batch_size = tf.shape(node_ids)[0]
 
-            mask = create_padding_mask(node_ids)
-
-            nodes_mask = tf.cast(tf.not_equal(nodes_subtokens_ids, 0), tf.float32)[:, :, :, tf.newaxis]
-            nodes_types_emb = tf.nn.embedding_lookup(params=nodes_vocab, ids=node_ids)
-            nodes_subtoken_emb = tf.nn.embedding_lookup(params=subtoken_vocab, ids=nodes_subtokens_ids)
-            nodes_emb = tf.concat([nodes_types_emb, tf.reduce_sum(nodes_subtoken_emb * nodes_mask, axis=-2)], axis=-1)
+            input_mask = create_padding_mask(node_ids)
+            nodes_emb = self.prepare_node_embeddings(nodes_vocab, node_ids, subtoken_vocab, nodes_subtokens_ids)
             incidence_matrix = incidence_matrix[:, tf.newaxis, :, :]
-            encoded = self.encoder(nodes_emb, True, mask, incidence_matrix)
+            encoded = self.encoder(nodes_emb, True, input_mask, incidence_matrix)
 
-            target_mask = create_padding_mask(target_ids)
+            SOS_column = tf.ones((batch_size, 1), dtype=tf.int32) * self.queue_thread.SOS_id
+            input_target_ids = tf.concat([SOS_column, output_target_ids[:, :-1]], axis=-1) # SOS shift
+            target_mask = create_padding_mask(input_target_ids)
             look_ahead_mask = create_look_ahead_mask(self.config.MAX_TARGET_PARTS)
             combined_mask = tf.maximum(target_mask, look_ahead_mask)
 
-            target_emb = tf.nn.embedding_lookup(params=target_words_vocab, ids=target_ids)
-            logits, _ = self.decoder(target_emb, encoded, True, combined_mask, mask, self.target_vocab_size)
+            target_emb = tf.nn.embedding_lookup(params=target_words_vocab, ids=input_target_ids)
+            logits, _ = self.decoder(target_emb, encoded, True, combined_mask, input_mask, self.target_vocab_size)
 
             step = tf.Variable(0, trainable=False)
 
-            crossent = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=target_ids, logits=logits)
-            target_words_nonzero = tf.cast(tf.not_equal(target_ids, 0), tf.float32)
+            crossent = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=output_target_ids, logits=logits)
+            target_words_nonzero = tf.cast(tf.not_equal(output_target_ids, 0), tf.float32)
             loss = tf.reduce_sum(crossent * target_words_nonzero) / tf.to_float(batch_size)
 
             if self.config.USE_MOMENTUM:
@@ -410,159 +372,17 @@ class Model:
 
         return train_op, loss
 
-    def decode_outputs(self, target_words_vocab, target_input, batch_size, batched_contexts, valid_mask,
-                       is_evaluating=False):
-        num_contexts_per_example = tf.count_nonzero(valid_mask, axis=-1)
-
-        start_fill = tf.fill([batch_size],
-                             self.target_to_index[Common.SOS])  # (batch, )
-        decoder_cell = tf.nn.rnn_cell.MultiRNNCell([
-            tf.nn.rnn_cell.LSTMCell(self.config.DECODER_SIZE) for _ in range(self.config.NUM_DECODER_LAYERS)
-        ])
-        contexts_sum = tf.reduce_sum(batched_contexts * tf.expand_dims(valid_mask, -1),
-                                     axis=1)  # (batch_size, dim * 2 + rnn_size)
-        contexts_average = tf.divide(contexts_sum, tf.to_float(tf.expand_dims(num_contexts_per_example, -1)))
-        fake_encoder_state = tuple(tf.nn.rnn_cell.LSTMStateTuple(contexts_average, contexts_average) for _ in
-                                   range(self.config.NUM_DECODER_LAYERS))
-        projection_layer = tf.layers.Dense(self.target_vocab_size, use_bias=False)
-        if is_evaluating and self.config.BEAM_WIDTH > 0:
-            batched_contexts = tf.contrib.seq2seq.tile_batch(batched_contexts, multiplier=self.config.BEAM_WIDTH)
-            num_contexts_per_example = tf.contrib.seq2seq.tile_batch(num_contexts_per_example,
-                                                                     multiplier=self.config.BEAM_WIDTH)
-        attention_mechanism = tf.contrib.seq2seq.LuongAttention(
-            num_units=self.config.DECODER_SIZE,
-            memory=batched_contexts
-        )
-        # TF doesn't support beam search with alignment history
-        should_save_alignment_history = is_evaluating and self.config.BEAM_WIDTH == 0
-        decoder_cell = tf.contrib.seq2seq.AttentionWrapper(decoder_cell, attention_mechanism,
-                                                           attention_layer_size=self.config.DECODER_SIZE,
-                                                           alignment_history=should_save_alignment_history)
-        if is_evaluating:
-            if self.config.BEAM_WIDTH > 0:
-                decoder_initial_state = decoder_cell.zero_state(dtype=tf.float32,
-                                                                batch_size=batch_size * self.config.BEAM_WIDTH)
-                decoder_initial_state = decoder_initial_state.clone(
-                    cell_state=tf.contrib.seq2seq.tile_batch(fake_encoder_state, multiplier=self.config.BEAM_WIDTH))
-                decoder = tf.contrib.seq2seq.BeamSearchDecoder(
-                    cell=decoder_cell,
-                    embedding=target_words_vocab,
-                    start_tokens=start_fill,
-                    end_token=self.target_to_index[Common.PAD],
-                    initial_state=decoder_initial_state,
-                    beam_width=self.config.BEAM_WIDTH,
-                    output_layer=projection_layer,
-                    length_penalty_weight=0.0)
-            else:
-                helper = tf.contrib.seq2seq.GreedyEmbeddingHelper(target_words_vocab, start_fill, 0)
-                initial_state = decoder_cell.zero_state(batch_size, tf.float32).clone(cell_state=fake_encoder_state)
-                decoder = tf.contrib.seq2seq.BasicDecoder(cell=decoder_cell, helper=helper, initial_state=initial_state,
-                                                          output_layer=projection_layer)
-
-        else:
-            decoder_cell = tf.nn.rnn_cell.DropoutWrapper(decoder_cell,
-                                                         output_keep_prob=self.config.RNN_DROPOUT_KEEP_PROB)
-            target_words_embedding = tf.nn.embedding_lookup(target_words_vocab,
-                                                            tf.concat([tf.expand_dims(start_fill, -1), target_input],
-                                                                      axis=-1))  # (batch, max_target_parts, dim * 2 + rnn_size)
-            helper = tf.contrib.seq2seq.TrainingHelper(inputs=target_words_embedding,
-                                                       sequence_length=tf.ones([batch_size], dtype=tf.int32) * (
-                                                           self.config.MAX_TARGET_PARTS + 1))
-
-            initial_state = decoder_cell.zero_state(batch_size, tf.float32).clone(cell_state=fake_encoder_state)
-
-            decoder = tf.contrib.seq2seq.BasicDecoder(cell=decoder_cell, helper=helper, initial_state=initial_state,
-                                                      output_layer=projection_layer)
-        outputs, final_states, final_sequence_lengths = tf.contrib.seq2seq.dynamic_decode(decoder,
-                                                                                          maximum_iterations=self.config.MAX_TARGET_PARTS + 1)
-        return outputs, final_states
-
-    def calculate_path_abstraction(self, path_embed, path_lengths, valid_contexts_mask, is_evaluating=False):
-        return self.path_rnn_last_state(is_evaluating, path_embed, path_lengths, valid_contexts_mask)
-
-    def path_rnn_last_state(self, is_evaluating, path_embed, path_lengths, valid_contexts_mask):
-        # path_embed:           (batch, max_contexts, max_path_length+1, dim)
-        # path_length:          (batch, max_contexts)
-        # valid_contexts_mask:  (batch, max_contexts)
-        max_contexts = tf.shape(path_embed)[1]
-        flat_paths = tf.reshape(path_embed, shape=[-1, self.config.MAX_PATH_LENGTH,
-                                                   self.config.EMBEDDINGS_SIZE])  # (batch * max_contexts, max_path_length+1, dim)
-        flat_valid_contexts_mask = tf.reshape(valid_contexts_mask, [-1])  # (batch * max_contexts)
-        lengths = tf.multiply(tf.reshape(path_lengths, [-1]),
-                              tf.cast(flat_valid_contexts_mask, tf.int32))  # (batch * max_contexts)
-        if self.config.BIRNN:
-            rnn_cell_fw = tf.nn.rnn_cell.LSTMCell(self.config.RNN_SIZE / 2)
-            rnn_cell_bw = tf.nn.rnn_cell.LSTMCell(self.config.RNN_SIZE / 2)
-            if not is_evaluating:
-                rnn_cell_fw = tf.nn.rnn_cell.DropoutWrapper(rnn_cell_fw,
-                                                            output_keep_prob=self.config.RNN_DROPOUT_KEEP_PROB)
-                rnn_cell_bw = tf.nn.rnn_cell.DropoutWrapper(rnn_cell_bw,
-                                                            output_keep_prob=self.config.RNN_DROPOUT_KEEP_PROB)
-            _, (state_fw, state_bw) = tf.nn.bidirectional_dynamic_rnn(
-                cell_fw=rnn_cell_fw,
-                cell_bw=rnn_cell_bw,
-                inputs=flat_paths,
-                dtype=tf.float32,
-                sequence_length=lengths)
-            final_rnn_state = tf.concat([state_fw.h, state_bw.h], axis=-1)  # (batch * max_contexts, rnn_size)  
-        else:
-            rnn_cell = tf.nn.rnn_cell.LSTMCell(self.config.RNN_SIZE)
-            if not is_evaluating:
-                rnn_cell = tf.nn.rnn_cell.DropoutWrapper(rnn_cell, output_keep_prob=self.config.RNN_DROPOUT_KEEP_PROB)
-            _, state = tf.nn.dynamic_rnn(
-                cell=rnn_cell,
-                inputs=flat_paths,
-                dtype=tf.float32,
-                sequence_length=lengths
-            )
-            final_rnn_state = state.h  # (batch * max_contexts, rnn_size)
-
-        return tf.reshape(final_rnn_state,
-                          shape=[-1, max_contexts, self.config.RNN_SIZE])  # (batch, max_contexts, rnn_size)
-
-    def compute_contexts(self, subtoken_vocab, nodes_vocab, source_input, nodes_input,
-                         target_input, valid_mask, path_source_lengths, path_lengths, path_target_lengths,
-                         is_evaluating=False):
-
-        source_word_embed = tf.nn.embedding_lookup(params=subtoken_vocab,
-                                                   ids=source_input)  # (batch, max_contexts, max_name_parts, dim)
-        path_embed = tf.nn.embedding_lookup(params=nodes_vocab,
-                                            ids=nodes_input)  # (batch, max_contexts, max_path_length+1, dim)
-        target_word_embed = tf.nn.embedding_lookup(params=subtoken_vocab,
-                                                   ids=target_input)  # (batch, max_contexts, max_name_parts, dim)
-
-        source_word_mask = tf.expand_dims(
-            tf.sequence_mask(path_source_lengths, maxlen=self.config.MAX_NAME_PARTS, dtype=tf.float32),
-            -1)  # (batch, max_contexts, max_name_parts, 1)
-        target_word_mask = tf.expand_dims(
-            tf.sequence_mask(path_target_lengths, maxlen=self.config.MAX_NAME_PARTS, dtype=tf.float32),
-            -1)  # (batch, max_contexts, max_name_parts, 1)
-
-        source_words_sum = tf.reduce_sum(source_word_embed * source_word_mask,
-                                         axis=2)  # (batch, max_contexts, dim)
-        path_nodes_aggregation = self.calculate_path_abstraction(path_embed, path_lengths, valid_mask,
-                                                                 is_evaluating)  # (batch, max_contexts, rnn_size)
-        target_words_sum = tf.reduce_sum(target_word_embed * target_word_mask, axis=2)  # (batch, max_contexts, dim)
-
-        context_embed = tf.concat([source_words_sum, path_nodes_aggregation, target_words_sum],
-                                  axis=-1)  # (batch, max_contexts, dim * 2 + rnn_size)
-        if not is_evaluating:
-            context_embed = tf.nn.dropout(context_embed, self.config.EMBEDDINGS_DROPOUT_KEEP_PROB)
-
-        batched_embed = tf.layers.dense(inputs=context_embed, units=self.config.DECODER_SIZE,
-                                        activation=tf.nn.tanh, trainable=not is_evaluating, use_bias=False)
-
-        return batched_embed
+    def prepare_node_embeddings(self, nodes_vocab, node_ids, subtoken_vocab, nodes_subtokens_ids):
+        nodes_mask = tf.cast(tf.not_equal(nodes_subtokens_ids, 0), tf.float32)[:, :, :, tf.newaxis]
+        nodes_types_emb = tf.nn.embedding_lookup(params=nodes_vocab, ids=node_ids)
+        nodes_subtoken_emb = tf.nn.embedding_lookup(params=subtoken_vocab, ids=nodes_subtokens_ids)
+        nodes_emb = tf.concat([nodes_types_emb, tf.reduce_sum(nodes_subtoken_emb * nodes_mask, axis=-2)], axis=-1)
+        return nodes_emb
 
     def build_test_graph(self, input_tensors):
-        target_index = input_tensors[reader.TARGET_INDEX_KEY]
-        path_source_indices = input_tensors[reader.PATH_SOURCE_INDICES_KEY]
-        node_indices = input_tensors[reader.NODE_INDICES_KEY]
-        path_target_indices = input_tensors[reader.PATH_TARGET_INDICES_KEY]
-        valid_mask = input_tensors[reader.VALID_CONTEXT_MASK_KEY]
-        path_source_lengths = input_tensors[reader.PATH_SOURCE_LENGTHS_KEY]
-        path_lengths = input_tensors[reader.PATH_LENGTHS_KEY]
-        path_target_lengths = input_tensors[reader.PATH_TARGET_LENGTHS_KEY]
+        node_ids = input_tensors[reader.NODE_IDS_KEY]
+        nodes_subtokens_ids = input_tensors[reader.SUBTOKEN_IDS_KEY]
+        incidence_matrix = input_tensors[reader.INCIDENCE_MATRIX_KEY]
 
         with tf.variable_scope('model', reuse=self.get_should_reuse_variables()):
             subtoken_vocab = tf.get_variable('SUBTOKENS_VOCAB',
@@ -575,29 +395,27 @@ class Model:
                                           shape=(self.nodes_vocab_size, self.config.EMBEDDINGS_SIZE),
                                           dtype=tf.float32, trainable=False)
 
-            batched_contexts = self.compute_contexts(subtoken_vocab=subtoken_vocab, nodes_vocab=nodes_vocab,
-                                                     source_input=path_source_indices, nodes_input=node_indices,
-                                                     target_input=path_target_indices,
-                                                     valid_mask=valid_mask,
-                                                     path_source_lengths=path_source_lengths,
-                                                     path_lengths=path_lengths, path_target_lengths=path_target_lengths,
-                                                     is_evaluating=True)
+            batch_size = tf.shape(node_ids)[0]
+            input_mask = create_padding_mask(node_ids)
+            nodes_emb = self.prepare_node_embeddings(nodes_vocab, node_ids, subtoken_vocab, nodes_subtokens_ids)
+            incidence_matrix = incidence_matrix[:, tf.newaxis, :, :]
+            encoded = self.encoder(nodes_emb, False, input_mask, incidence_matrix)
 
-            outputs, final_states = self.decode_outputs(target_words_vocab=target_words_vocab,
-                                                        target_input=target_index, batch_size=tf.shape(target_index)[0],
-                                                        batched_contexts=batched_contexts, valid_mask=valid_mask,
-                                                        is_evaluating=True)
+            input_target_ids = tf.ones((batch_size, 1), dtype=tf.int32) * self.queue_thread.SOS_id
 
-        if self.config.BEAM_WIDTH > 0:
-            predicted_indices = outputs.predicted_ids
-            topk_values = outputs.beam_search_decoder_output.scores
-            attention_weights = [tf.no_op()]
-        else:
-            predicted_indices = outputs.sample_id
-            topk_values = tf.constant(1, shape=(1, 1), dtype=tf.float32)
-            attention_weights = tf.squeeze(final_states.alignment_history.stack(), 1)
+            for i in range(self.config.MAX_TARGET_PARTS):
+                target_mask = create_padding_mask(input_target_ids)
+                look_ahead_mask = create_look_ahead_mask(tf.shape(input_target_ids)[1])
+                combined_mask = tf.maximum(target_mask, look_ahead_mask)
 
-        return predicted_indices, topk_values, target_index, attention_weights
+                target_emb = tf.nn.embedding_lookup(params=target_words_vocab, ids=input_target_ids)
+                logits, _ = self.decoder(target_emb, encoded, True, combined_mask, input_mask, self.target_vocab_size)
+                predictions = logits[:, -1:, :]
+                predicted_id = tf.argmax(predictions, axis=-1, output_type=tf.int32)
+                input_target_ids = tf.concat([input_target_ids, predicted_id], axis=-1)
+            predicted_indices = input_target_ids[:, 1:]
+
+        return predicted_indices
 
     def predict(self, predict_data_lines):
         if self.predict_queue is None:

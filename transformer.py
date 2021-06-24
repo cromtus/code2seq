@@ -127,12 +127,12 @@ class EncoderLayer(tf.keras.layers.Layer):
 
         attn_output, _ = self.mha(x, x, x, mask, incidence_matrix)  # (batch_size, input_seq_len, d_model)
         attn_output = self.dropout1(attn_output, training=training)
-        out1 = tf.contrib.layers.layer_norm(x + attn_output, trainable=training)  # (batch_size, input_seq_len, d_model)
+        out1 = tf.contrib.layers.layer_norm(x + attn_output, trainable=training, reuse=tf.AUTO_REUSE, scope="norm4")  # (batch_size, input_seq_len, d_model)
         # out1 = self.layernorm1(x + attn_output)  # (batch_size, input_seq_len, d_model)
 
         ffn_output = self.ffn(out1)  # (batch_size, input_seq_len, d_model)
         ffn_output = self.dropout2(ffn_output, training=training)
-        out2 = tf.contrib.layers.layer_norm(out1 + ffn_output, trainable=training)
+        out2 = tf.contrib.layers.layer_norm(out1 + ffn_output, trainable=training, reuse=tf.AUTO_REUSE, scope="norm5")
         # out2 = self.layernorm2(out1 + ffn_output)  # (batch_size, input_seq_len, d_model)
 
         return out2
@@ -181,17 +181,17 @@ class DecoderLayer(tf.keras.layers.Layer):
 
         attn1, attn_weights_block1 = self.mha1(x, x, x, look_ahead_mask)  # (batch_size, target_seq_len, d_model)
         attn1 = self.dropout1(attn1, training=training)
-        out1 = tf.contrib.layers.layer_norm(attn1 + x, trainable=training)
+        out1 = tf.contrib.layers.layer_norm(attn1 + x, trainable=training, reuse=tf.AUTO_REUSE, scope="norm1")
 
         attn2, attn_weights_block2 = self.mha2(out1,
             enc_output, enc_output, padding_mask)  # (batch_size, target_seq_len, d_model)
         attn2 = self.dropout2(attn2, training=training)
-        out2 = tf.contrib.layers.layer_norm(attn2 + out1, trainable=training)  # (batch_size, target_seq_len, d_model)
+        out2 = tf.contrib.layers.layer_norm(attn2 + out1, trainable=training, reuse=tf.AUTO_REUSE, scope="norm2")  # (batch_size, target_seq_len, d_model)
         # out2 = self.layernorm2(attn2 + out1)
 
         ffn_output = self.ffn(out2)  # (batch_size, target_seq_len, d_model)
         ffn_output = self.dropout3(ffn_output, training=training)
-        out3 = tf.contrib.layers.layer_norm(ffn_output + out2, trainable=training)  # (batch_size, target_seq_len, d_model)
+        out3 = tf.contrib.layers.layer_norm(ffn_output + out2, trainable=training, reuse=tf.AUTO_REUSE, scope="norm3")  # (batch_size, target_seq_len, d_model)
         # out3 = self.layernorm3(ffn_output + out2)  # (batch_size, target_seq_len, d_model)
 
         return out3, attn_weights_block1, attn_weights_block2
@@ -229,5 +229,5 @@ class Decoder(tf.keras.layers.Layer):
             attention_weights[f'decoder_layer{i+1}_block2'] = block2
 
         # x.shape == (batch_size, target_seq_len, d_model)
-        logits = tf.layers.dense(inputs=x, units=voc_size, trainable=training, use_bias=False)
+        logits = tf.layers.dense(inputs=x, units=voc_size, trainable=training, use_bias=False, name="final", reuse=tf.AUTO_REUSE)
         return logits, attention_weights
