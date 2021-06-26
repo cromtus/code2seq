@@ -20,7 +20,7 @@ class Config:
         config.NUM_DECODER_LAYERS = 1
         config.MAX_PATH_LENGTH = 8 + 1
         config.MAX_NAME_PARTS = 5
-        config.MAX_TARGET_PARTS = 6
+        config.MAX_TARGET_PARTS = config.MAX_CONTEXTS
         config.EMBEDDINGS_DROPOUT_KEEP_PROB = 0.75
         config.RNN_DROPOUT_KEEP_PROB = 0.5
         config.RANDOM_CONTEXTS = True
@@ -88,7 +88,7 @@ class Config:
         config.NUM_DECODER_LAYERS = 1
         config.MAX_PATH_LENGTH = 8 + 1
         config.MAX_NAME_PARTS = 5
-        config.MAX_TARGET_PARTS = 6
+        config.MAX_TARGET_PARTS = config.MAX_CONTEXTS
         config.EMBEDDINGS_DROPOUT_KEEP_PROB = 1
         config.RNN_DROPOUT_KEEP_PROB = 1
         config.RANDOM_CONTEXTS = True

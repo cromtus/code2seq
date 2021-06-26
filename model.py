@@ -340,7 +340,7 @@ class Model:
             incidence_matrix = incidence_matrix[:, tf.newaxis, :, :]
             encoded = self.encoder(nodes_emb, True, input_mask, incidence_matrix)
 
-            SOS_column = tf.ones((batch_size, 1), dtype=tf.int32) * self.queue_thread.SOS_id
+            SOS_column = tf.fill((batch_size, 1), self.queue_thread.SOS_id)
             input_target_ids = tf.concat([SOS_column, output_target_ids[:, :-1]], axis=-1) # SOS shift
             target_mask = create_padding_mask(input_target_ids)
             look_ahead_mask = create_look_ahead_mask(self.config.MAX_TARGET_PARTS)
@@ -418,14 +418,15 @@ class Model:
             incidence_matrix = incidence_matrix[:, tf.newaxis, :, :]
             encoded = self.encoder(nodes_emb, False, input_mask, incidence_matrix)
 
-            input_target_ids = tf.ones((batch_size, 1), dtype=tf.int32) * self.queue_thread.SOS_id
+            input_target_ids = tf.fill((batch_size, 1), self.queue_thread.SOS_id)
 
             for i in range(self.config.MAX_TARGET_PARTS):
-                target_mask = create_padding_mask(input_target_ids)
-                look_ahead_mask = create_look_ahead_mask(tf.shape(input_target_ids)[1])
+                input_target_ids_padded = reader.pad_up_to(input_target_ids, (batch_size, self.config.MAX_TARGET_PARTS), 0)
+                target_mask = create_padding_mask(input_target_ids_padded)
+                look_ahead_mask = create_look_ahead_mask(tf.shape(input_target_ids_padded)[1])
                 combined_mask = tf.maximum(target_mask, look_ahead_mask)
 
-                target_emb = tf.nn.embedding_lookup(params=target_words_vocab, ids=input_target_ids)
+                target_emb = tf.nn.embedding_lookup(params=target_words_vocab, ids=input_target_ids_padded)
                 logits, _ = self.decoder(target_emb, encoded, True, combined_mask, input_mask, self.target_vocab_size)
                 predictions = logits[:, -1:, :]
                 predicted_id = tf.argmax(predictions, axis=-1, output_type=tf.int32)
