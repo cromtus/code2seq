@@ -84,7 +84,7 @@ def scaled_dot_product_attention(q, k, v, mask=None, incidence_matrix=None):
     if mask is not None:
         scaled_attention_logits += (mask * -1e9)
     if incidence_matrix is not None:
-        scaled_attention_logits += (1 - incidence_matrix) * -1e9
+        scaled_attention_logits += (1 - incidence_matrix) * -1e1
 
     # softmax is normalized on the last axis (seq_len_k) so that the scores
     # add up to 1.
